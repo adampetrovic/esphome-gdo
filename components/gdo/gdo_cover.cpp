@@ -51,6 +51,9 @@ void GdoCover::setup() {
         ESP_LOGI(TAG, "Open endstop reached. Took %.1fs.", dur);
         this->position = COVER_OPEN;
         this->target_position_ = COVER_OPEN;
+        if (this->current_operation != COVER_OPERATION_IDLE) {
+          this->last_direction_before_idle_ = this->current_operation;
+        }
         this->current_operation = COVER_OPERATION_IDLE;
         this->publish_state();
       } else {
@@ -73,6 +76,9 @@ void GdoCover::setup() {
         ESP_LOGI(TAG, "Closed endstop reached. Took %.1fs.", dur);
         this->position = COVER_CLOSED;
         this->target_position_ = COVER_CLOSED;
+        if (this->current_operation != COVER_OPERATION_IDLE) {
+          this->last_direction_before_idle_ = this->current_operation;
+        }
         this->current_operation = COVER_OPERATION_IDLE;
         this->publish_state();
       } else {
@@ -102,6 +108,9 @@ void GdoCover::loop() {
   if (this->is_at_target_()) {
     if (this->target_position_ == COVER_OPEN || this->target_position_ == COVER_CLOSED) {
       // Don't trigger stop, let the cover stop by itself.
+      if (this->current_operation != COVER_OPERATION_IDLE) {
+        this->last_direction_before_idle_ = this->current_operation;
+      }
       this->current_operation = COVER_OPERATION_IDLE;
     } else {
       this->start_direction_(COVER_OPERATION_IDLE);
@@ -113,6 +122,9 @@ void GdoCover::loop() {
               now - this->start_dir_time_ > this->close_duration_)) {
     ESP_LOGI(TAG, "Failed to reach endstop. Likely stopped externally.");
     this->position = UNKNOWN_POSITION;
+    if (this->current_operation != COVER_OPERATION_IDLE) {
+      this->last_direction_before_idle_ = this->current_operation;
+    }
     this->current_operation = COVER_OPERATION_IDLE;
     this->publish_state();
   }
@@ -182,68 +194,92 @@ void GdoCover::start_direction_(CoverOperation dir, bool perform_trigger) {
   }
 
   this->recompute_position_();
-  Trigger<> *trig;
+  Trigger<> *trig = nullptr;
+
+  // Determine how many pulses are needed based on OSD terminal state machine
   switch (dir) {
     case COVER_OPERATION_IDLE:
-      switch (this->current_operation) {
-        case COVER_OPERATION_OPENING:
-          ESP_LOGI(TAG, "Door is opening. Asked to stop.");
-          trig = this->single_press_trigger_;
-          break;
-        case COVER_OPERATION_CLOSING:
-          ESP_LOGI(TAG, "Door is closing. Asked to stop.");
-          trig = this->double_press_trigger_;
-          break;
-        default:
-          return;
+      // Stopping while moving: 1 pulse
+      if (this->current_operation == COVER_OPERATION_OPENING) {
+        ESP_LOGI(TAG, "Door is opening. Asked to stop.");
+        trig = this->single_press_trigger_;
+      } else if (this->current_operation == COVER_OPERATION_CLOSING) {
+        ESP_LOGI(TAG, "Door is closing. Asked to stop.");
+        trig = this->single_press_trigger_;
+      } else {
+        return;
       }
       break;
+
     case COVER_OPERATION_OPENING:
-      switch (this->current_operation) {
-        case COVER_OPERATION_IDLE:
-          if (this->position == COVER_CLOSED) {
-            ESP_LOGI(TAG, "Door is fully closed. Asked to open.");
-            trig = this->single_press_trigger_;
-          } else if (this->position == COVER_OPEN) {
-            ESP_LOGW(TAG, "Door is fully open. Cannot open more.");
-            return;
-          } else {
-            ESP_LOGI(TAG, "Door is partially open. Asked to open more.");
-            trig = this->double_press_trigger_;
-          }
-          break;
-        case COVER_OPERATION_CLOSING:
-          ESP_LOGI(TAG, "Door is closing. Asked to open.");
+      if (this->current_operation == COVER_OPERATION_IDLE) {
+        // From idle state
+        if (this->position == COVER_CLOSED) {
+          ESP_LOGI(TAG, "Door is fully closed. Asked to open.");
           trig = this->single_press_trigger_;
-          break;
-        default:
+        } else if (this->position == COVER_OPEN) {
+          ESP_LOGW(TAG, "Door is fully open. Cannot open more.");
           return;
-      }
-      break;
-    case COVER_OPERATION_CLOSING:
-      switch (this->current_operation) {
-        case COVER_OPERATION_IDLE:
-          if (this->position == COVER_CLOSED) {
-            ESP_LOGI(TAG, "Door is fully closed. Cannot close more.");
-            return;
-          } else if (this->position == COVER_OPEN) {
-            ESP_LOGW(TAG, "Door is fully open. Asked to close.");
+        } else {
+          // Partially open - depends on previous direction
+          if (this->last_direction_before_idle_ == COVER_OPERATION_CLOSING) {
+            ESP_LOGI(TAG, "Door stopped while closing. Asked to open (opposite direction).");
             trig = this->single_press_trigger_;
+          } else if (this->last_direction_before_idle_ == COVER_OPERATION_OPENING) {
+            ESP_LOGI(TAG, "Door stopped while opening. Asked to resume opening (same direction).");
+            trig = this->triple_press_trigger_;
           } else {
-            ESP_LOGI(TAG, "Door is partially open. Asked to close more.");
+            // Unknown previous direction, assume opposite
+            ESP_LOGI(TAG, "Door is partially open (unknown direction). Asked to open.");
             trig = this->single_press_trigger_;
           }
-          break;
-        case COVER_OPERATION_OPENING:
-          ESP_LOGI(TAG, "Door is opening. Asked to close.");
-          trig = this->double_press_trigger_;
-          break;
-        default:
-          return;
+        }
+      } else if (this->current_operation == COVER_OPERATION_CLOSING) {
+        ESP_LOGI(TAG, "Door is closing. Asked to reverse and open.");
+        trig = this->double_press_trigger_;
+      } else {
+        return;
       }
       break;
+
+    case COVER_OPERATION_CLOSING:
+      if (this->current_operation == COVER_OPERATION_IDLE) {
+        // From idle state
+        if (this->position == COVER_CLOSED) {
+          ESP_LOGI(TAG, "Door is fully closed. Cannot close more.");
+          return;
+        } else if (this->position == COVER_OPEN) {
+          ESP_LOGI(TAG, "Door is fully open. Asked to close.");
+          trig = this->single_press_trigger_;
+        } else {
+          // Partially open - depends on previous direction
+          if (this->last_direction_before_idle_ == COVER_OPERATION_OPENING) {
+            ESP_LOGI(TAG, "Door stopped while opening. Asked to close (opposite direction).");
+            trig = this->single_press_trigger_;
+          } else if (this->last_direction_before_idle_ == COVER_OPERATION_CLOSING) {
+            ESP_LOGI(TAG, "Door stopped while closing. Asked to resume closing (same direction).");
+            trig = this->triple_press_trigger_;
+          } else {
+            // Unknown previous direction, assume opposite
+            ESP_LOGI(TAG, "Door is partially open (unknown direction). Asked to close.");
+            trig = this->single_press_trigger_;
+          }
+        }
+      } else if (this->current_operation == COVER_OPERATION_OPENING) {
+        ESP_LOGI(TAG, "Door is opening. Asked to reverse and close.");
+        trig = this->double_press_trigger_;
+      } else {
+        return;
+      }
+      break;
+
     default:
       return;
+  }
+
+  // Save previous direction before updating current operation
+  if (this->current_operation != COVER_OPERATION_IDLE) {
+    this->last_direction_before_idle_ = this->current_operation;
   }
 
   this->current_operation = dir;
@@ -252,7 +288,7 @@ void GdoCover::start_direction_(CoverOperation dir, bool perform_trigger) {
   this->start_dir_time_ = now;
   this->last_recompute_time_ = now;
 
-  if (perform_trigger) {
+  if (perform_trigger && trig != nullptr) {
     this->stop_prev_trigger_();
     trig->trigger();
     this->prev_command_trigger_ = trig;

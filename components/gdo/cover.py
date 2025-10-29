@@ -15,6 +15,7 @@ GdoCover = gdo_ns.class_("GdoCover", cover.Cover, cg.Component)
 
 CONF_SINGLE_PRESS_ACTION = "single_press_action"
 CONF_DOUBLE_PRESS_ACTION = "double_press_action"
+CONF_TRIPLE_PRESS_ACTION = "triple_press_action"
 
 CONFIG_SCHEMA = (
     cover.cover_schema(GdoCover)
@@ -28,6 +29,9 @@ CONFIG_SCHEMA = (
                 single=True
             ),
             cv.Required(CONF_DOUBLE_PRESS_ACTION): automation.validate_automation(
+                single=True
+            ),
+            cv.Required(CONF_TRIPLE_PRESS_ACTION): automation.validate_automation(
                 single=True
             ),
         }
@@ -55,4 +59,7 @@ async def to_code(config):
     )
     await automation.build_automation(
         var.get_double_press_trigger(), [], config[CONF_DOUBLE_PRESS_ACTION]
+    )
+    await automation.build_automation(
+        var.get_triple_press_trigger(), [], config[CONF_TRIPLE_PRESS_ACTION]
     )
