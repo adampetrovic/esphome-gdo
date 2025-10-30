@@ -416,14 +416,15 @@ void GdoCover::start_direction_(CoverOperation dir, bool perform_trigger) {
   }
 
   if (defer_state_change) {
-    // Waiting for sensor confirmation
+    // Waiting for sensor confirmation - do NOT use action delay timer
+    // Sensor callback will activate operation when confirmed
     this->pending_operation_ = dir;
     this->pending_operation_time_ = now;
-    this->action_delay_end_time_ = (action_delay > 0) ? now + action_delay : 0;
-    ESP_LOGI(TAG, "Deferred state change. current_operation stays %d, pending_operation set to %d",
+    this->action_delay_end_time_ = 0;  // Sensor callback handles activation
+    ESP_LOGI(TAG, "Deferred state change (sensor confirmation). current_operation stays %d, pending_operation set to %d",
              this->current_operation, dir);
   } else if (action_delay > 0) {
-    // Waiting for action delay to complete
+    // Waiting for action delay to complete (no sensor to wait for)
     this->pending_operation_ = dir;
     this->pending_operation_time_ = now;
     this->action_delay_end_time_ = now + action_delay;
