@@ -133,7 +133,19 @@ void GdoCover::loop() {
       ESP_LOGW(TAG, "Pending operation timed out after %ums. Door did not start moving.", pending_duration);
       this->pending_operation_ = COVER_OPERATION_IDLE;
       this->pending_operation_time_ = 0;
-      this->position = UNKNOWN_POSITION;
+
+      // Trust sensor state if available
+      if (this->close_endstop_ != nullptr && this->close_endstop_->state) {
+        ESP_LOGI(TAG, "close_endstop shows door is closed. Setting position to CLOSED.");
+        this->position = COVER_CLOSED;
+      } else if (this->open_endstop_ != nullptr && this->open_endstop_->state) {
+        ESP_LOGI(TAG, "open_endstop shows door is open. Setting position to OPEN.");
+        this->position = COVER_OPEN;
+      } else {
+        ESP_LOGI(TAG, "No sensor confirmation. Setting position to UNKNOWN.");
+        this->position = UNKNOWN_POSITION;
+      }
+
       this->publish_state();
     }
   }
@@ -163,7 +175,19 @@ void GdoCover::loop() {
              (this->current_operation == COVER_OPERATION_CLOSING && this->close_endstop_ != nullptr &&
               now - this->start_dir_time_ > this->close_duration_)) {
     ESP_LOGI(TAG, "Failed to reach endstop. Likely stopped externally.");
-    this->position = UNKNOWN_POSITION;
+
+    // Check sensor state before setting position to UNKNOWN
+    if (this->close_endstop_ != nullptr && this->close_endstop_->state) {
+      ESP_LOGI(TAG, "close_endstop shows door is closed. Setting position to CLOSED.");
+      this->position = COVER_CLOSED;
+    } else if (this->open_endstop_ != nullptr && this->open_endstop_->state) {
+      ESP_LOGI(TAG, "open_endstop shows door is open. Setting position to OPEN.");
+      this->position = COVER_OPEN;
+    } else {
+      ESP_LOGI(TAG, "No sensor confirmation. Setting position to UNKNOWN.");
+      this->position = UNKNOWN_POSITION;
+    }
+
     if (this->current_operation != COVER_OPERATION_IDLE) {
       this->last_direction_before_idle_ = this->current_operation;
     }
@@ -202,6 +226,7 @@ void GdoCover::control(const CoverCall &call) {
       auto op = pos < this->position ? COVER_OPERATION_CLOSING : COVER_OPERATION_OPENING;
       this->target_position_ = pos;
       this->start_direction_(op);
+      this->publish_state();
     }
   }
 }
@@ -328,14 +353,20 @@ void GdoCover::start_direction_(CoverOperation dir, bool perform_trigger) {
 
   // Check if we should defer state change until sensor confirms movement
   bool defer_state_change = false;
-  if (dir == COVER_OPERATION_OPENING && this->close_endstop_ != nullptr && this->close_endstop_->state) {
-    // Door is at closed endstop, wait for sensor to confirm it moved
-    ESP_LOGI(TAG, "Waiting for close_endstop to confirm door movement");
-    defer_state_change = true;
-  } else if (dir == COVER_OPERATION_CLOSING && this->open_endstop_ != nullptr && this->open_endstop_->state) {
-    // Door is at open endstop, wait for sensor to confirm it moved
-    ESP_LOGI(TAG, "Waiting for open_endstop to confirm door movement");
-    defer_state_change = true;
+  if (dir == COVER_OPERATION_OPENING && this->close_endstop_ != nullptr) {
+    ESP_LOGD(TAG, "Checking close_endstop state: %s", this->close_endstop_->state ? "true (closed)" : "false (open)");
+    if (this->close_endstop_->state) {
+      // Door is at closed endstop, wait for sensor to confirm it moved
+      ESP_LOGI(TAG, "Waiting for close_endstop to confirm door movement");
+      defer_state_change = true;
+    }
+  } else if (dir == COVER_OPERATION_CLOSING && this->open_endstop_ != nullptr) {
+    ESP_LOGD(TAG, "Checking open_endstop state: %s", this->open_endstop_->state ? "true (open)" : "false (closed)");
+    if (this->open_endstop_->state) {
+      // Door is at open endstop, wait for sensor to confirm it moved
+      ESP_LOGI(TAG, "Waiting for open_endstop to confirm door movement");
+      defer_state_change = true;
+    }
   }
 
   const uint32_t now = millis();
@@ -343,10 +374,13 @@ void GdoCover::start_direction_(CoverOperation dir, bool perform_trigger) {
   if (defer_state_change) {
     this->pending_operation_ = dir;
     this->pending_operation_time_ = now;
+    ESP_LOGI(TAG, "Deferred state change. current_operation stays %d, pending_operation set to %d",
+             this->current_operation, dir);
   } else {
     this->current_operation = dir;
     this->pending_operation_ = COVER_OPERATION_IDLE;
     this->pending_operation_time_ = 0;
+    ESP_LOGD(TAG, "Immediate state change. current_operation set to %d", dir);
   }
 
   this->start_dir_time_ = now;
