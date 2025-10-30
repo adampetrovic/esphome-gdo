@@ -22,6 +22,9 @@ class GdoCover : public cover::Cover, public Component {
   void set_close_endstop(binary_sensor::BinarySensor *close_endstop) { this->close_endstop_ = close_endstop; }
   void set_open_duration(uint32_t open_duration) { this->open_duration_ = open_duration; }
   void set_close_duration(uint32_t close_duration) { this->close_duration_ = close_duration; }
+  void set_single_press_duration(uint32_t duration) { this->single_press_duration_ = duration; }
+  void set_double_press_duration(uint32_t duration) { this->double_press_duration_ = duration; }
+  void set_triple_press_duration(uint32_t duration) { this->triple_press_duration_ = duration; }
 
   cover::CoverTraits get_traits() override;
 
@@ -38,6 +41,9 @@ class GdoCover : public cover::Cover, public Component {
   binary_sensor::BinarySensor *close_endstop_{nullptr};
   uint32_t open_duration_;
   uint32_t close_duration_;
+  uint32_t single_press_duration_{100};
+  uint32_t double_press_duration_{1200};
+  uint32_t triple_press_duration_{2300};
   Trigger<> *single_press_trigger_{new Trigger<>()};
   Trigger<> *double_press_trigger_{new Trigger<>()};
   Trigger<> *triple_press_trigger_{new Trigger<>()};

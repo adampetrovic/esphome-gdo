@@ -398,8 +398,24 @@ void GdoCover::start_direction_(CoverOperation dir, bool perform_trigger) {
     ESP_LOGD(TAG, "Immediate state change. current_operation set to %d", dir);
   }
 
-  this->start_dir_time_ = now;
-  this->last_recompute_time_ = now;
+  // Calculate action delay to adjust timing for multi-pulse actions
+  uint32_t action_delay = 0;
+  if (trig == this->single_press_trigger_) {
+    action_delay = this->single_press_duration_;
+  } else if (trig == this->double_press_trigger_) {
+    action_delay = this->double_press_duration_;
+  } else if (trig == this->triple_press_trigger_) {
+    action_delay = this->triple_press_duration_;
+  }
+
+  // Adjust timestamps to account for action execution time
+  // This prevents position from advancing before door actually starts moving
+  this->start_dir_time_ = now + action_delay;
+  this->last_recompute_time_ = now + action_delay;
+
+  if (action_delay > 0) {
+    ESP_LOGD(TAG, "Adjusting timestamps by %ums to account for action execution time", action_delay);
+  }
 
   if (perform_trigger && trig != nullptr) {
     this->stop_prev_trigger_();
