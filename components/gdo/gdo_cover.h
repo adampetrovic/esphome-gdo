@@ -47,6 +47,8 @@ class GdoCover : public cover::Cover, public Component {
   uint32_t last_publish_time_{0};
   float target_position_{0};
   cover::CoverOperation last_direction_before_idle_{cover::COVER_OPERATION_IDLE};
+  cover::CoverOperation pending_operation_{cover::COVER_OPERATION_IDLE};
+  uint32_t pending_operation_time_{0};
 };
 
 }  // namespace gdo

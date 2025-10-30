@@ -55,15 +55,29 @@ void GdoCover::setup() {
           this->last_direction_before_idle_ = this->current_operation;
         }
         this->current_operation = COVER_OPERATION_IDLE;
+        this->pending_operation_ = COVER_OPERATION_IDLE;
+        this->pending_operation_time_ = 0;
         this->publish_state();
       } else {
         // Moved away from the open endstop.
-        // If this was triggered by an external control assume target position is fully closed
-        // and start updating state without triggering a press.
         ESP_LOGI(TAG, "Open endstop released.");
         if (this->current_operation == COVER_OPERATION_IDLE) {
-          this->target_position_ = COVER_CLOSED;
-          this->start_direction_(COVER_OPERATION_CLOSING, false);
+          if (this->pending_operation_ == COVER_OPERATION_CLOSING) {
+            // Our command has been confirmed by sensor, activate the pending operation
+            ESP_LOGI(TAG, "Sensor confirmed door movement, activating pending CLOSING operation");
+            this->current_operation = COVER_OPERATION_CLOSING;
+            this->pending_operation_ = COVER_OPERATION_IDLE;
+            this->pending_operation_time_ = 0;
+            const uint32_t now = millis();
+            this->start_dir_time_ = now;
+            this->last_recompute_time_ = now;
+            this->publish_state();
+          } else {
+            // External control - assume target position is fully closed
+            // and start updating state without triggering a press.
+            this->target_position_ = COVER_CLOSED;
+            this->start_direction_(COVER_OPERATION_CLOSING, false);
+          }
         }
       }
     });
@@ -80,15 +94,29 @@ void GdoCover::setup() {
           this->last_direction_before_idle_ = this->current_operation;
         }
         this->current_operation = COVER_OPERATION_IDLE;
+        this->pending_operation_ = COVER_OPERATION_IDLE;
+        this->pending_operation_time_ = 0;
         this->publish_state();
       } else {
         // Moved away from the closed endstop.
-        // If this was triggered by an external control assume target position is fully open
-        // and start updating state without triggering a press.
         ESP_LOGI(TAG, "Closed endstop released.");
         if (this->current_operation == COVER_OPERATION_IDLE) {
-          this->target_position_ = COVER_OPEN;
-          this->start_direction_(COVER_OPERATION_OPENING, false);
+          if (this->pending_operation_ == COVER_OPERATION_OPENING) {
+            // Our command has been confirmed by sensor, activate the pending operation
+            ESP_LOGI(TAG, "Sensor confirmed door movement, activating pending OPENING operation");
+            this->current_operation = COVER_OPERATION_OPENING;
+            this->pending_operation_ = COVER_OPERATION_IDLE;
+            this->pending_operation_time_ = 0;
+            const uint32_t now = millis();
+            this->start_dir_time_ = now;
+            this->last_recompute_time_ = now;
+            this->publish_state();
+          } else {
+            // External control - assume target position is fully open
+            // and start updating state without triggering a press.
+            this->target_position_ = COVER_OPEN;
+            this->start_direction_(COVER_OPERATION_OPENING, false);
+          }
         }
       }
     });
@@ -96,11 +124,23 @@ void GdoCover::setup() {
 }
 
 void GdoCover::loop() {
+  const uint32_t now = millis();
+
+  // Check for pending operation timeout (door never started moving)
+  if (this->pending_operation_ != COVER_OPERATION_IDLE && this->pending_operation_time_ > 0) {
+    const uint32_t pending_duration = now - this->pending_operation_time_;
+    if (pending_duration > 3000) {  // 3 second timeout
+      ESP_LOGW(TAG, "Pending operation timed out after %ums. Door did not start moving.", pending_duration);
+      this->pending_operation_ = COVER_OPERATION_IDLE;
+      this->pending_operation_time_ = 0;
+      this->position = UNKNOWN_POSITION;
+      this->publish_state();
+    }
+  }
+
   if (this->current_operation == COVER_OPERATION_IDLE) {
     return;
   }
-
-  const uint32_t now = millis();
 
   // Recompute position every loop cycle
   this->recompute_position_();
@@ -112,6 +152,8 @@ void GdoCover::loop() {
         this->last_direction_before_idle_ = this->current_operation;
       }
       this->current_operation = COVER_OPERATION_IDLE;
+      this->pending_operation_ = COVER_OPERATION_IDLE;
+      this->pending_operation_time_ = 0;
     } else {
       this->start_direction_(COVER_OPERATION_IDLE);
     }
@@ -126,6 +168,8 @@ void GdoCover::loop() {
       this->last_direction_before_idle_ = this->current_operation;
     }
     this->current_operation = COVER_OPERATION_IDLE;
+    this->pending_operation_ = COVER_OPERATION_IDLE;
+    this->pending_operation_time_ = 0;
     this->publish_state();
   }
 
@@ -282,9 +326,29 @@ void GdoCover::start_direction_(CoverOperation dir, bool perform_trigger) {
     this->last_direction_before_idle_ = this->current_operation;
   }
 
-  this->current_operation = dir;
+  // Check if we should defer state change until sensor confirms movement
+  bool defer_state_change = false;
+  if (dir == COVER_OPERATION_OPENING && this->close_endstop_ != nullptr && this->close_endstop_->state) {
+    // Door is at closed endstop, wait for sensor to confirm it moved
+    ESP_LOGI(TAG, "Waiting for close_endstop to confirm door movement");
+    defer_state_change = true;
+  } else if (dir == COVER_OPERATION_CLOSING && this->open_endstop_ != nullptr && this->open_endstop_->state) {
+    // Door is at open endstop, wait for sensor to confirm it moved
+    ESP_LOGI(TAG, "Waiting for open_endstop to confirm door movement");
+    defer_state_change = true;
+  }
 
   const uint32_t now = millis();
+
+  if (defer_state_change) {
+    this->pending_operation_ = dir;
+    this->pending_operation_time_ = now;
+  } else {
+    this->current_operation = dir;
+    this->pending_operation_ = COVER_OPERATION_IDLE;
+    this->pending_operation_time_ = 0;
+  }
+
   this->start_dir_time_ = now;
   this->last_recompute_time_ = now;
 
