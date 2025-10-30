@@ -403,8 +403,9 @@ void GdoCover::start_direction_(CoverOperation dir, bool perform_trigger) {
   const uint32_t now = millis();
 
   // Calculate action delay based on which trigger we're using
+  // BUT: STOP commands (IDLE) should take effect immediately
   uint32_t action_delay = 0;
-  if (perform_trigger && trig != nullptr) {
+  if (perform_trigger && trig != nullptr && dir != COVER_OPERATION_IDLE) {
     if (trig == this->single_press_trigger_) {
       action_delay = this->relay_on_duration_;
     } else if (trig == this->double_press_trigger_) {
@@ -423,7 +424,7 @@ void GdoCover::start_direction_(CoverOperation dir, bool perform_trigger) {
     this->action_delay_end_time_ = 0;  // Sensor callback handles activation
     ESP_LOGI(TAG, "Deferred state change (sensor confirmation). current_operation stays %d, pending_operation set to %d",
              this->current_operation, dir);
-  } else if (action_delay > 0) {
+  } else if (action_delay > 0 && dir != COVER_OPERATION_IDLE) {
     // Waiting for action delay to complete (no sensor to wait for)
     this->pending_operation_ = dir;
     this->pending_operation_time_ = now;
