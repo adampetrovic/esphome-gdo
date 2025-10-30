@@ -126,6 +126,21 @@ void GdoCover::setup() {
 void GdoCover::loop() {
   const uint32_t now = millis();
 
+  // Correct position if it's inconsistent with sensor state (while idle)
+  if (this->current_operation == COVER_OPERATION_IDLE && this->pending_operation_ == COVER_OPERATION_IDLE) {
+    if (this->close_endstop_ != nullptr && this->close_endstop_->state && this->position != COVER_CLOSED) {
+      ESP_LOGI(TAG, "Correcting position: close_endstop is active but position was %.0f%%. Setting to CLOSED.",
+               this->position * 100);
+      this->position = COVER_CLOSED;
+      this->publish_state();
+    } else if (this->open_endstop_ != nullptr && this->open_endstop_->state && this->position != COVER_OPEN) {
+      ESP_LOGI(TAG, "Correcting position: open_endstop is active but position was %.0f%%. Setting to OPEN.",
+               this->position * 100);
+      this->position = COVER_OPEN;
+      this->publish_state();
+    }
+  }
+
   // Check for pending operation timeout (door never started moving)
   if (this->pending_operation_ != COVER_OPERATION_IDLE && this->pending_operation_time_ > 0) {
     const uint32_t pending_duration = now - this->pending_operation_time_;
