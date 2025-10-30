@@ -270,6 +270,12 @@ void GdoCover::stop_prev_trigger_() {
 }
 
 bool GdoCover::is_at_target_() const {
+  // If we have a pending operation that differs from current, we're NOT at target
+  // (we're waiting to change direction)
+  if (this->pending_operation_ != COVER_OPERATION_IDLE && this->pending_operation_ != this->current_operation) {
+    return false;
+  }
+
   switch (this->current_operation) {
     case COVER_OPERATION_OPENING:
       if (this->target_position_ == COVER_OPEN && this->open_endstop_ != nullptr) {
