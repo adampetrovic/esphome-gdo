@@ -68,6 +68,7 @@ void GdoCover::setup() {
             this->current_operation = COVER_OPERATION_CLOSING;
             this->pending_operation_ = COVER_OPERATION_IDLE;
             this->pending_operation_time_ = 0;
+            this->action_delay_end_time_ = 0;
             const uint32_t now = millis();
             this->start_dir_time_ = now;
             this->last_recompute_time_ = now;
@@ -107,6 +108,7 @@ void GdoCover::setup() {
             this->current_operation = COVER_OPERATION_OPENING;
             this->pending_operation_ = COVER_OPERATION_IDLE;
             this->pending_operation_time_ = 0;
+            this->action_delay_end_time_ = 0;
             const uint32_t now = millis();
             this->start_dir_time_ = now;
             this->last_recompute_time_ = now;
@@ -141,6 +143,19 @@ void GdoCover::loop() {
     }
   }
 
+  // Check if action delay has completed
+  if (this->pending_operation_ != COVER_OPERATION_IDLE && this->action_delay_end_time_ > 0 && now >= this->action_delay_end_time_) {
+    ESP_LOGI(TAG, "Action delay completed, activating %s operation",
+             this->pending_operation_ == COVER_OPERATION_OPENING ? "OPENING" : "CLOSING");
+    this->current_operation = this->pending_operation_;
+    this->pending_operation_ = COVER_OPERATION_IDLE;
+    this->action_delay_end_time_ = 0;
+    // Set timing from when door ACTUALLY starts moving
+    this->start_dir_time_ = now;
+    this->last_recompute_time_ = now;
+    this->publish_state();
+  }
+
   // Check for pending operation timeout (door never started moving)
   if (this->pending_operation_ != COVER_OPERATION_IDLE && this->pending_operation_time_ > 0) {
     const uint32_t pending_duration = now - this->pending_operation_time_;
@@ -148,6 +163,7 @@ void GdoCover::loop() {
       ESP_LOGW(TAG, "Pending operation timed out after %ums. Door did not start moving.", pending_duration);
       this->pending_operation_ = COVER_OPERATION_IDLE;
       this->pending_operation_time_ = 0;
+      this->action_delay_end_time_ = 0;
 
       // Trust sensor state if available
       if (this->close_endstop_ != nullptr && this->close_endstop_->state) {
@@ -386,35 +402,41 @@ void GdoCover::start_direction_(CoverOperation dir, bool perform_trigger) {
 
   const uint32_t now = millis();
 
+  // Calculate action delay based on which trigger we're using
+  uint32_t action_delay = 0;
+  if (perform_trigger && trig != nullptr) {
+    if (trig == this->single_press_trigger_) {
+      action_delay = this->relay_on_duration_;
+    } else if (trig == this->double_press_trigger_) {
+      action_delay = (2 * this->relay_on_duration_) + this->pulse_delay_;
+    } else if (trig == this->triple_press_trigger_) {
+      action_delay = (3 * this->relay_on_duration_) + (2 * this->pulse_delay_);
+    }
+    ESP_LOGD(TAG, "Action delay calculated: %ums", action_delay);
+  }
+
   if (defer_state_change) {
+    // Waiting for sensor confirmation
     this->pending_operation_ = dir;
     this->pending_operation_time_ = now;
+    this->action_delay_end_time_ = (action_delay > 0) ? now + action_delay : 0;
     ESP_LOGI(TAG, "Deferred state change. current_operation stays %d, pending_operation set to %d",
              this->current_operation, dir);
+  } else if (action_delay > 0) {
+    // Waiting for action delay to complete
+    this->pending_operation_ = dir;
+    this->pending_operation_time_ = now;
+    this->action_delay_end_time_ = now + action_delay;
+    ESP_LOGI(TAG, "Deferring state change for %ums action delay. pending_operation set to %d", action_delay, dir);
   } else {
+    // Immediate state change (no sensor wait, no action delay)
     this->current_operation = dir;
     this->pending_operation_ = COVER_OPERATION_IDLE;
     this->pending_operation_time_ = 0;
+    this->action_delay_end_time_ = 0;
+    this->start_dir_time_ = now;
+    this->last_recompute_time_ = now;
     ESP_LOGD(TAG, "Immediate state change. current_operation set to %d", dir);
-  }
-
-  // Calculate action delay to adjust timing for multi-pulse actions
-  uint32_t action_delay = 0;
-  if (trig == this->single_press_trigger_) {
-    action_delay = this->single_press_duration_;
-  } else if (trig == this->double_press_trigger_) {
-    action_delay = this->double_press_duration_;
-  } else if (trig == this->triple_press_trigger_) {
-    action_delay = this->triple_press_duration_;
-  }
-
-  // Adjust timestamps to account for action execution time
-  // This prevents position from advancing before door actually starts moving
-  this->start_dir_time_ = now + action_delay;
-  this->last_recompute_time_ = now + action_delay;
-
-  if (action_delay > 0) {
-    ESP_LOGD(TAG, "Adjusting timestamps by %ums to account for action execution time", action_delay);
   }
 
   if (perform_trigger && trig != nullptr) {

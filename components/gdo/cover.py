@@ -16,9 +16,8 @@ GdoCover = gdo_ns.class_("GdoCover", cover.Cover, cg.Component)
 CONF_SINGLE_PRESS_ACTION = "single_press_action"
 CONF_DOUBLE_PRESS_ACTION = "double_press_action"
 CONF_TRIPLE_PRESS_ACTION = "triple_press_action"
-CONF_SINGLE_PRESS_DURATION = "single_press_duration"
-CONF_DOUBLE_PRESS_DURATION = "double_press_duration"
-CONF_TRIPLE_PRESS_DURATION = "triple_press_duration"
+CONF_RELAY_ON_DURATION = "relay_on_duration"
+CONF_PULSE_DELAY = "pulse_delay"
 
 CONFIG_SCHEMA = (
     cover.cover_schema(GdoCover)
@@ -28,9 +27,8 @@ CONFIG_SCHEMA = (
             cv.Required(CONF_OPEN_DURATION): cv.positive_time_period_milliseconds,
             cv.Optional(CONF_CLOSE_ENDSTOP): cv.use_id(binary_sensor.BinarySensor),
             cv.Required(CONF_CLOSE_DURATION): cv.positive_time_period_milliseconds,
-            cv.Optional(CONF_SINGLE_PRESS_DURATION, default="100ms"): cv.positive_time_period_milliseconds,
-            cv.Optional(CONF_DOUBLE_PRESS_DURATION, default="1200ms"): cv.positive_time_period_milliseconds,
-            cv.Optional(CONF_TRIPLE_PRESS_DURATION, default="2300ms"): cv.positive_time_period_milliseconds,
+            cv.Optional(CONF_RELAY_ON_DURATION, default="80ms"): cv.positive_time_period_milliseconds,
+            cv.Optional(CONF_PULSE_DELAY, default="160ms"): cv.positive_time_period_milliseconds,
             cv.Required(CONF_SINGLE_PRESS_ACTION): automation.validate_automation(
                 single=True
             ),
@@ -59,9 +57,8 @@ async def to_code(config):
         bin = await cg.get_variable(config[CONF_CLOSE_ENDSTOP])
         cg.add(var.set_close_endstop(bin))
     cg.add(var.set_close_duration(config[CONF_CLOSE_DURATION]))
-    cg.add(var.set_single_press_duration(config[CONF_SINGLE_PRESS_DURATION]))
-    cg.add(var.set_double_press_duration(config[CONF_DOUBLE_PRESS_DURATION]))
-    cg.add(var.set_triple_press_duration(config[CONF_TRIPLE_PRESS_DURATION]))
+    cg.add(var.set_relay_on_duration(config[CONF_RELAY_ON_DURATION]))
+    cg.add(var.set_pulse_delay(config[CONF_PULSE_DELAY]))
 
     await automation.build_automation(
         var.get_single_press_trigger(), [], config[CONF_SINGLE_PRESS_ACTION]

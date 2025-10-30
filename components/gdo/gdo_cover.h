@@ -22,9 +22,8 @@ class GdoCover : public cover::Cover, public Component {
   void set_close_endstop(binary_sensor::BinarySensor *close_endstop) { this->close_endstop_ = close_endstop; }
   void set_open_duration(uint32_t open_duration) { this->open_duration_ = open_duration; }
   void set_close_duration(uint32_t close_duration) { this->close_duration_ = close_duration; }
-  void set_single_press_duration(uint32_t duration) { this->single_press_duration_ = duration; }
-  void set_double_press_duration(uint32_t duration) { this->double_press_duration_ = duration; }
-  void set_triple_press_duration(uint32_t duration) { this->triple_press_duration_ = duration; }
+  void set_relay_on_duration(uint32_t duration) { this->relay_on_duration_ = duration; }
+  void set_pulse_delay(uint32_t delay) { this->pulse_delay_ = delay; }
 
   cover::CoverTraits get_traits() override;
 
@@ -41,9 +40,8 @@ class GdoCover : public cover::Cover, public Component {
   binary_sensor::BinarySensor *close_endstop_{nullptr};
   uint32_t open_duration_;
   uint32_t close_duration_;
-  uint32_t single_press_duration_{100};
-  uint32_t double_press_duration_{1200};
-  uint32_t triple_press_duration_{2300};
+  uint32_t relay_on_duration_{80};
+  uint32_t pulse_delay_{160};
   Trigger<> *single_press_trigger_{new Trigger<>()};
   Trigger<> *double_press_trigger_{new Trigger<>()};
   Trigger<> *triple_press_trigger_{new Trigger<>()};
@@ -55,6 +53,7 @@ class GdoCover : public cover::Cover, public Component {
   cover::CoverOperation last_direction_before_idle_{cover::COVER_OPERATION_IDLE};
   cover::CoverOperation pending_operation_{cover::COVER_OPERATION_IDLE};
   uint32_t pending_operation_time_{0};
+  uint32_t action_delay_end_time_{0};
 };
 
 }  // namespace gdo
